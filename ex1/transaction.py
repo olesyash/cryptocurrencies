@@ -17,6 +17,7 @@ class Transaction:
 
     def get_txid(self) -> TxID:
         """Returns the identifier of this transaction. This is the SHA256 of the transaction contents."""
-        hashed_input = hashlib.sha256(self.input).digest()
-        return TxID(hashed_input)
+        input_bytes = self.input if self.input is not None else b""
 
+        hashed_input = hashlib.sha256(input_bytes).digest()
+        return TxID(hashed_input)
