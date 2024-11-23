@@ -46,6 +46,19 @@ class Wallet:
         bank just yet (it still wasn't included in a block) then the wallet  shouldn't spend it again
         until unfreeze_all() is called. The method returns None if there are no unspent outputs that can be used.
         """
+        # Retrieve the list of unspent transactions (UTXOs) from the bank
+        # Find an unspent transaction that belongs to this wallet
+        for utxo in self.utxos:
+            if utxo not in self.frozen_utxos:
+                self.frozen_utxos.append(utxo)
+                # Sign the transaction with the wallet's private key
+                signature = sign(utxo, self.private_key)
+                # Create a new transaction using the unspent transaction
+                new_tx = Transaction(target, utxo, signature)
+                return new_tx
+
+        # Return None if there are no unspent outputs that can be used
+        return None
 
     def unfreeze_all(self) -> None:
         """
