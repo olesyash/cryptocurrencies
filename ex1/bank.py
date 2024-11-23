@@ -64,6 +64,8 @@ class Bank:
         """
         This function returns the hash of the last Block that was created by the bank.
         """
+        if not self.blockchain:
+            return self.latest_block_hash
         return self.blockchain[-1].get_block_hash()
 
     def get_mempool(self) -> List[Transaction]:
