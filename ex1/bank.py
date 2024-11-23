@@ -1,16 +1,17 @@
 import secrets
-
 from .utils import BlockHash, PublicKey
 from .transaction import Transaction
 from .block import Block
 from typing import List
 from .utils import *
 
+
 class Bank:
     def __init__(self) -> None:
         """Creates a bank with an empty blockchain and an empty mempool."""
         self.mem_pool: List[Transaction] = []
         self.blockchain: List[Block] = []
+        self.latest_block_hash: BlockHash = BlockHash(b"Genesis")
 
     def add_transaction_to_mempool(self, transaction: Transaction) -> bool:
         """
@@ -21,19 +22,20 @@ class Bank:
         (iii) there is contradicting tx in the mempool.
         (iv) there is no input (i.e., this is an attempt to create money from nothing)
         """
-        # Check if the transaction is valid (signature verification)
-        if not verify(transaction.input, transaction.signature, transaction.output):
+        # Check if the transaction has a valid input and signature
+        input_tx = next((tx for tx in self.get_utxo() if tx.get_txid() == transaction.input), None)
+        if not input_tx or not self.verify_transaction(transaction, input_tx):
             return False
 
-        # Check for contradicting transactions in the mempool
-        for tx in self.mem_pool:
-            if tx.input == transaction.input:
-                return False
+        # Ensure no contradicting transactions in the mempool
+        if any(tx.input == transaction.input for tx in self.mem_pool):
+            return False
 
-        # Check if there is no input (attempt to create money from nothing)
+        # Check if the transaction is attempting to create money improperly
         if transaction.input is None:
             return False
 
+        # Add the transaction to the mempool
         self.mem_pool.append(transaction)
         return True
 
@@ -98,3 +100,18 @@ class Bank:
         signature = Signature(secrets.token_bytes(48))
         transaction = Transaction(target, None, signature)
         self.mem_pool.append(transaction)
+
+    def verify_transaction(self, transaction: Transaction, input_tx: Transaction) -> bool:
+        """
+        Verifies that a transaction is valid by checking its signature against the input transaction's output.
+        """
+        # Ensure the input transaction's output matches the transaction's public key
+        if transaction.input != input_tx.get_txid():
+            return False
+
+        # Verify the signature against the public key
+        return verify(
+            message=input_tx.get_txid(),
+            sig=transaction.signature,
+            pub_key=input_tx.output,
+        )
