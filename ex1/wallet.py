@@ -7,7 +7,7 @@ from typing import Optional
 class Wallet:
     def __init__(self) -> None:
         """This function generates a new wallet with a new private key."""
-        raise NotImplementedError()
+        self.private_key, self.public_key = gen_keys()
 
     def update(self, bank: Bank) -> None:
         """
@@ -46,4 +46,4 @@ class Wallet:
         """
         This function returns the public address of this wallet (see the utils module for generating keys).
         """
-        raise NotImplementedError()
+        return self.public_key
