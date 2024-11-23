@@ -1,3 +1,5 @@
+import secrets
+
 from .utils import BlockHash, PublicKey
 from .transaction import Transaction
 from .block import Block
@@ -93,4 +95,6 @@ class Bank:
         this transaction includes a random string of 48 bytes (so that every two creation transactions are different).
         This function is a secret function that only the bank can use (currently for tests, and will make sense in a later exercise).
         """
-        raise NotImplementedError()
+        signature = Signature(secrets.token_bytes(48))
+        transaction = Transaction(target, None, signature)
+        self.mem_pool.append(transaction)
