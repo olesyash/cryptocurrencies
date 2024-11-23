@@ -1,5 +1,6 @@
 from .utils import PublicKey, TxID, Signature
 from typing import Optional
+import hashlib
 
 
 class Transaction:
@@ -16,4 +17,5 @@ class Transaction:
 
     def get_txid(self) -> TxID:
         """Returns the identifier of this transaction. This is the SHA256 of the transaction contents."""
-        raise NotImplementedError()
+        return TxID(hashlib.sha256(self.input).digest())
+
