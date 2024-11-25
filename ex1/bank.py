@@ -2,7 +2,7 @@ import secrets
 from .utils import BlockHash, PublicKey
 from .transaction import Transaction
 from .block import Block
-from typing import List
+from typing import List, Set
 from .utils import *
 
 
@@ -78,20 +78,32 @@ class Bank:
         """
         This function returns the list of unspent transactions.
         """
-        utxos = []
-        spent_txids = set()
+        spent_outputs = set()  # Set of (transaction_hash, output_index)
+        # Collect unspent transactions
+        utxo: List[Transaction] = []
 
-        # Iterate through all blocks in the blockchain
+        # First, collect all spent outputs from confirmed transactions in all blocks
         for block in self.blockchain:
-            for tx in block.transactions:
-                # If the transaction has an input, mark it as spent
-                if tx.input:
-                    spent_txids.add(tx.input)
-                # Add the transaction to UTXOs if it is not spent
-                if tx.get_txid() not in spent_txids:
-                    utxos.append(tx)
+            for transaction in block.get_transactions():
+                if transaction.input is not None:
+                    print(f"Spent output: {transaction.input}")
+                    # If a transaction has an input, it means it spent a previous coin
+                    spent_outputs.add(transaction.input)
 
-        return utxos
+        # Iterate through blocks in reverse order (newest first)
+        seen_outputs = set()
+        for block in reversed(self.blockchain):
+            # For each block, check its transactions
+            for transaction in block.get_transactions():
+                print(f"Checking transaction: {transaction}, Input: {transaction.input}, Output: {transaction.output}")
+                # If this output hasn't been spent, mark the transaction as having unspent outputs
+                if transaction.output not in seen_outputs:
+                    if transaction.input is None or transaction.get_txid() not in spent_outputs:
+                        # If the transaction has any unspent outputs, add it to the UTXO list
+                        print(f"Adding to UTXO: {transaction}")
+                        utxo.append(transaction)
+                        seen_outputs.add(transaction.output)
+        return utxo
 
     def create_money(self, target: PublicKey) -> None:
         """
