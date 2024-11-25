@@ -22,8 +22,15 @@ class Bank:
         (iii) there is contradicting tx in the mempool.
         (iv) there is no input (i.e., this is an attempt to create money from nothing)
         """
+
+        new_tx = Transaction(transaction.output, transaction.input, transaction.signature)
+        new_tx_id = new_tx.get_txid()
+        if new_tx_id != transaction.get_txid():
+            return False
+
         # Check if the transaction has a valid input and signature
         input_tx = next((tx for tx in self.get_utxo() if tx.get_txid() == transaction.input), None)
+
         if not input_tx or not self.verify_transaction(transaction, input_tx):
             return False
 
@@ -33,6 +40,10 @@ class Bank:
 
         # Check if the transaction is attempting to create money improperly
         if transaction.input is None:
+            return False
+
+        # Check if the transaction is already in the mempool
+        if transaction in self.mem_pool:
             return False
 
         # Add the transaction to the mempool
@@ -125,7 +136,7 @@ class Bank:
 
         # Verify the signature against the public key
         return verify(
-            message=input_tx.get_txid(),
+            message=input_tx.get_txid() + transaction.output,
             sig=transaction.signature,
             pub_key=input_tx.output,
         )

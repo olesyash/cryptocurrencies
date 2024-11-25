@@ -60,9 +60,11 @@ def test_spend_coin_not_mine(bank2: Bank, alice: Wallet, bob: Wallet, alice_coin
 def test_change_output_of_signed_transaction(bank: Bank, alice: Wallet, bob: Wallet, charlie: Wallet,
                                              alice_coin: Transaction) -> None:
     tx = alice.create_transaction(bob.get_address())
+    print(f"alice txid: {tx.get_txid()}")
     assert tx is not None
     tx = Transaction(output=charlie.get_address(),
                      input=tx.input, signature=tx.signature)
+    print(f"charlie txid: {tx.get_txid()})")
     assert not bank.add_transaction_to_mempool(tx)
     assert not bank.get_mempool()
     bank.end_day()
@@ -75,15 +77,46 @@ def test_change_output_of_signed_transaction(bank: Bank, alice: Wallet, bob: Wal
 
 def test_change_coin_of_signed_transaction(bank: Bank, alice: Wallet, bob: Wallet, charlie: Wallet,
                                            alice_coin: Transaction) -> None:
-    # Give Bob two coins
+    print("Initial state:")
+    print(f"Alice UTXOs: {alice.utxos}")
+    print(f"Bob UTXOs: {bob.utxos}")
+    print(f"Bank Mempool: {len(bank.mem_pool)}")
+
+    # Give Bob a coin from Alice
     tx = alice.create_transaction(bob.get_address())
-    assert tx is not None
+    assert tx is not None, "Transaction creation failed"
+
+    print("After Alice's transaction:")
+    print(f"Transaction target: {tx.output}")
+    print(f"Transaction input: {tx.input}")
+
     bank.add_transaction_to_mempool(tx)
+    print(f"Bank Mempool after add: {len(bank.mem_pool)}")
+
+    # Create one more coin for Bob from the bank
     bank.create_money(bob.get_address())
+    print(f"Bank Mempool after create_money: {len(bank.mem_pool)}")
+
     bank.end_day()
+    print(f"Blockchain length: {len(bank.blockchain)}")
+    print(f"Last block transactions: {[tx.output for tx in bank.blockchain[-1].get_transactions()]}")
+
     alice.update(bank)
     bob.update(bank)
     charlie.update(bank)
+
+    print("\nAfter updates:")
+    print(f"Alice UTXOs: {alice.utxos}")
+    print(f"Bob UTXOs: {bob.utxos}")
+
+    # Debug: Inspect UTXOs
+    utxos = bank.get_utxo()
+    print("\nAll UTXOs:")
+    for utxo in utxos:
+        print(f"UTXO: {utxo}, Output: {utxo.output}")
+
+    # Check number of UTXOs
+    print(f"Total UTXOs: {len(utxos)}")
     bob_coin1, bob_coin2 = bank.get_utxo()
     # Bob gives a coin to Charlie, and Charlie wants to steal the second one
     tx = bob.create_transaction(charlie.get_address())
