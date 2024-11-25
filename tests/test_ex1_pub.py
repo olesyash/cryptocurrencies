@@ -60,9 +60,11 @@ def test_spend_coin_not_mine(bank2: Bank, alice: Wallet, bob: Wallet, alice_coin
 def test_change_output_of_signed_transaction(bank: Bank, alice: Wallet, bob: Wallet, charlie: Wallet,
                                              alice_coin: Transaction) -> None:
     tx = alice.create_transaction(bob.get_address())
+    print(f"alice txid: {tx.get_txid()}")
     assert tx is not None
     tx = Transaction(output=charlie.get_address(),
                      input=tx.input, signature=tx.signature)
+    print(f"charlie txid: {tx.get_txid()})")
     assert not bank.add_transaction_to_mempool(tx)
     assert not bank.get_mempool()
     bank.end_day()

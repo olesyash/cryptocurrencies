@@ -52,7 +52,8 @@ class Wallet:
             if utxo not in self.frozen_utxos:
                 self.frozen_utxos.append(utxo)
                 # Sign the transaction with the wallet's private key
-                signature = sign(utxo, self.private_key)
+                message = utxo + target
+                signature = sign(message, self.private_key)
                 # Create a new transaction using the unspent transaction
                 new_tx = Transaction(target, utxo, signature)
                 return new_tx
