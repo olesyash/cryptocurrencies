@@ -20,8 +20,6 @@ class Transaction:
         """Returns the identifier of this transaction. This is the SHA256 of the transaction contents."""
         input_bytes = self.input if self.input is not None else b""
         output_bytes = self.output if self.output is not None else b""
-        # todo check if this should include or not the output and singature
-        # input_bytes += output_bytes
-        # input_bytes += self.signature
+        input_bytes += output_bytes
         hashed_input = hashlib.sha256(input_bytes).digest()
         return TxID(hashed_input)
