@@ -22,6 +22,8 @@ class Bank:
         (iii) there is contradicting tx in the mempool.
         (iv) there is no input (i.e., this is an attempt to create money from nothing)
         """
+        if not transaction:
+            return False
 
         new_tx = Transaction(transaction.output, transaction.input, transaction.signature)
         new_tx_id = new_tx.get_txid()
