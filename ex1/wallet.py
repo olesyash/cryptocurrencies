@@ -9,8 +9,8 @@ class Wallet:
     def __init__(self) -> None:
         """This function generates a new wallet with a new private key."""
         self.private_key, self.public_key = gen_keys()
-        self.utxos: List[TxID] = []  # Track UTxOs owned by the wallet.
-        self.frozen_utxos: List[TxID] = []  # UTxOs lock by pending transactions.
+        self.utxos: List[Transaction] = []  # Track UTxOs owned by the wallet.
+        self.frozen_utxos: List[Transaction] = []  # UTxOs lock by pending transactions.
         self.last_block_hash: Optional[BlockHash] = None
 
     def update(self, bank: Bank) -> None:
@@ -21,21 +21,22 @@ class Wallet:
         """
         index = 0
         if self.last_block_hash:
-            #  Search for the index of the last processed block in the blockchain
             for i, block in enumerate(bank.blockchain):
                 if block.get_block_hash() == self.last_block_hash:
                     index = i + 1
                     break
 
+        # Store full transactions, not just IDs
         for block in bank.blockchain[index:]:
             for tx in block.get_transactions():
                 if tx.output == self.get_address():
-                    # Add new UTxOs that belong to this wallet
-                    self.utxos.append(tx.get_txid())
+                    # Store the full transaction, not just its ID
+                    self.utxos.append(tx)
+
                 # Remove spent UTxOs
-                if tx.input in self.utxos:
-                    self.utxos.remove(tx.input)
-                    self.frozen_utxos.remove(tx.input)
+                # Now check against full transactions
+                self.utxos = [utxo for utxo in self.utxos if utxo.get_txid() != tx.input]
+                self.frozen_utxos = [f_utxo for f_utxo in self.frozen_utxos if f_utxo != tx.input]
 
             self.last_block_hash = block.get_block_hash()
 
@@ -53,10 +54,10 @@ class Wallet:
             if utxo not in self.frozen_utxos:
                 self.frozen_utxos.append(utxo)
                 # Sign the transaction with the wallet's private key
-                message = utxo + target
+                message = utxo.get_txid() + target
                 signature = sign(message, self.private_key)
                 # Create a new transaction using the unspent transaction
-                new_tx = Transaction(target, utxo, signature)
+                new_tx = Transaction(target, utxo.get_txid(), signature)
                 return new_tx
 
         # Return None if there are no unspent outputs that can be used

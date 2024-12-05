@@ -25,9 +25,17 @@ class Bank:
         if not transaction:
             return False
 
-        new_tx = Transaction(transaction.output, transaction.input, transaction.signature)
-        new_tx_id = new_tx.get_txid()
-        if new_tx_id != transaction.get_txid():
+        # new_tx = Transaction(transaction.output, transaction.input, transaction.signature)
+        # new_tx_id = new_tx.get_txid()
+        # if new_tx_id != transaction.get_txid():
+        #     return False
+
+        # Special handling for money creation transactions (with None input)
+        if transaction.input is None:
+            # For money creation transactions, skip the input verification
+            if self.verify_transaction(transaction, transaction):
+                self.mem_pool.append(transaction)
+                return True
             return False
 
         # Check if the transaction has a valid input and signature
@@ -62,7 +70,11 @@ class Bank:
         transactions = self.mem_pool[:limit]
         self.mem_pool = self.mem_pool[limit:]
         block = Block(transactions, self.get_latest_hash())
+        print("Transactions going into block:", [tx.get_txid() for tx in transactions])
         self.blockchain.append(block)
+        print("Blockchain after appending:", [block.get_transactions() for block in self.blockchain])
+        for tx in block.get_transactions():
+            print(f"  Transaction - Input: {tx.input}, Output: {tx.output}, TxID: {tx.get_txid()}")
         return block.get_block_hash()
 
     def get_block(self, block_hash: BlockHash) -> Block:
@@ -94,14 +106,12 @@ class Bank:
         spent_outputs = set()  # Set of (transaction_hash, output_index)
         # Collect unspent transactions
         utxo: List[Transaction] = []
-
         # First, collect all spent outputs from confirmed transactions in all blocks
         for block in self.blockchain:
             for transaction in block.get_transactions():
-                if transaction.input is not None:
-                    print(f"Spent output: {transaction.input}")
-                    # If a transaction has an input, it means it spent a previous coin
-                    spent_outputs.add(transaction.input)
+                print(f"Spent output: {transaction.input}")
+                # If a transaction has an input, it means it spent a previous coin
+                spent_outputs.add(transaction.input)
 
         # Iterate through blocks in reverse order (newest first)
         seen_outputs = set()
@@ -110,12 +120,11 @@ class Bank:
             for transaction in block.get_transactions():
                 print(f"Checking transaction: {transaction}, Input: {transaction.input}, Output: {transaction.output}")
                 # If this output hasn't been spent, mark the transaction as having unspent outputs
-                if transaction.output not in seen_outputs:
-                    if transaction.input is None or transaction.get_txid() not in spent_outputs:
-                        # If the transaction has any unspent outputs, add it to the UTXO list
-                        print(f"Adding to UTXO: {transaction}")
-                        utxo.append(transaction)
-                        seen_outputs.add(transaction.output)
+                if transaction.get_txid() not in spent_outputs:
+                    # If the transaction has any unspent outputs, add it to the UTXO list
+                    print(f"Adding to UTXO: {transaction}")
+                    utxo.append(transaction)
+                    seen_outputs.add(transaction.output)
         return utxo
 
     def create_money(self, target: PublicKey) -> None:
