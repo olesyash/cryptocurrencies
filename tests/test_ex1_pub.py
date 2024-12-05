@@ -320,6 +320,7 @@ def test_transaction_with_multiple_inputs(bank: Bank, alice: Wallet, bob: Wallet
     bob.update(bank)
 
     tx2 = alice.create_transaction(charlie.get_address())
+
     assert tx2 is not None
     bank.add_transaction_to_mempool(tx2)
     bank.end_day()

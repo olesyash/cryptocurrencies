@@ -35,6 +35,7 @@ class Wallet:
                 # Remove spent UTxOs
                 if tx.input in self.utxos:
                     self.utxos.remove(tx.input)
+                    self.frozen_utxos.remove(tx.input)
 
             self.last_block_hash = block.get_block_hash()
 
