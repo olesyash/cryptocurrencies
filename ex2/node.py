@@ -93,7 +93,7 @@ class Node:
         If the block doesnt exist, a ValueError is raised.
         """
         for block in self.blockchain:
-            if block.hash == block_hash:
+            if block.get_block_hash() == block_hash:
                 return block
         raise ValueError(f"Block with hash {block_hash} not found")
 
