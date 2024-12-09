@@ -36,11 +36,15 @@ class Node:
 
     def disconnect_from(self, other: 'Node') -> None:
         """Disconnects this node from the other node. If the two were not connected, then nothing happens"""
-        raise NotImplementedError()
+        # Check if the other node is in this node's connections
+        if other in self.connections:
+            # Remove the connection in both directions
+            self.connections.remove(other)
+            other.connections.remove(self)
 
     def get_connections(self) -> Set['Node']:
         """Returns a set containing the connections of this node."""
-        raise NotImplementedError()
+        return self.connections
 
     def add_transaction_to_mempool(self, transaction: Transaction) -> bool:
         """
