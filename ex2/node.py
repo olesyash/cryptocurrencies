@@ -1,3 +1,6 @@
+import hashlib
+import os
+
 from .utils import *
 from .block import Block
 from .transaction import Transaction
@@ -10,7 +13,7 @@ class Node:
         Blocks mined by this node will reward the miner with a single new coin,
         created out of thin air and associated with the mining reward address"""
         self.mem_pool: List[Transaction] = []
-        _, self.public_key = gen_keys()
+        self.private_key, self.public_key = gen_keys()
         self.connections = Set['Node']()
         self.blockchain: List[Block] = []
         self.utxos: List[Transaction] = []
@@ -56,10 +59,31 @@ class Node:
 
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
-        raise NotImplementedError()
+        # Check if the transaction is valid
+        if not verify(transaction.get_txid(), transaction.signature, transaction.output):
+            return False
+
+        # Check if the source has the coin
+        if transaction.input not in self.utxos:
+            return False
+
+        # Check for contradicting transactions in the mempool
+        for tx in self.mem_pool:
+            if tx.input == transaction.input:
+                return False
+
+        # Add the transaction to the mempool
+        self.mem_pool.append(transaction)
+
+        # Send the transaction to neighboring nodes
+        for node in self.connections:
+            node.add_transaction_to_mempool(transaction)
+
+        return True
 
     def notify_of_block(self, block_hash: BlockHash, sender: 'Node') -> None:
-        """This method is used by a node's connection to inform it that it has learned of a
+        """
+        This method is used by a node's connection to inform it that it has learned of a
         new block (or created a new block). If the block is unknown to the current Node, The block is requested.
         We assume the sender of the message is specified, so that the node can choose to request this block if
         it wishes to do so.
@@ -70,26 +94,84 @@ class Node:
         If the block is indeed the tip of the longest chain,
         a notification of this block is sent to the neighboring nodes of this node.
         (no need to notify of previous blocks -- the nodes will fetch them if needed)
-
-        A reorg may be triggered by this block's introduction. In this case the utxo is rolled back to the split point,
-        and then rolled forward along the new branch.
-        the mempool is similarly emptied of transactions that cannot be executed now.
-        transactions that were rolled back and can still be executed are re-introduced into the mempool if they do
-        not conflict.
         """
-        raise NotImplementedError()
+        if block_hash not in [block.get_block_hash() for block in self.blockchain]:
+            # Request the block from the sender
+            block = sender.get_block(block_hash)
+            self.blockchain.append(block)
+            # Process and validate the block
+            # (Assuming a validate_block function exists)
+            if self.validate_block(block):
+                # Update mempool and utxo
+                self.update_mempool_and_utxo(block)
+                # Notify neighboring nodes
+                for node in self.connections:
+                    node.notify_of_block(block_hash, self)
 
-    def mine_block(self) -> BlockHash:
-        """"
+    @staticmethod
+    def validate_block(block: Block) -> bool:
+        """
+        Validates the given block by checking all signatures, hashes, and block size.
+        Returns True if the block is valid, otherwise False.
+        """
+        # Check block size
+        if len(block.get_transactions()) > BLOCK_SIZE:
+            return False
+
+        # Validate each transaction in the block
+        for tx in block.get_transactions():
+            if not verify(tx.get_txid(), tx.signature, tx.output):
+                return False
+
+        # Validate block hash
+        block_data = b''.join(tx.get_txid() for tx in block.get_transactions())
+        if block.get_block_hash() != hashlib.sha256(block_data).digest():
+            return False
+
+        return True
+
+    def update_mempool_and_utxo(self, block: Block) -> None:
+        """
+        Updates the mempool and UTXO set based on the transactions in the given block.
+        """
+        for tx in block.get_transactions():
+            # Remove the transaction from the mempool if it exists
+            self.mem_pool = [mempool_tx for mempool_tx in self.mem_pool if mempool_tx.get_txid() != tx.get_txid()]
+
+            # Update UTXO set
+            if tx.input:
+                self.utxos = [utxo for utxo in self.utxos if utxo.get_txid() != tx.input]
+            self.utxos.append(tx)
+
+    def mine_block(self) -> Optional[BlockHash]:
+        """
         This function allows the node to create a single block.
         The block should contain BLOCK_SIZE transactions (unless there aren't enough in the mempool). Of these,
-        BLOCK_SIZE-1 transactions come from the mempool and one addtional transaction will be included that creates
+        BLOCK_SIZE-1 transactions come from the mempool and one additional transaction will be included that creates
         money and adds it to the address of this miner.
         Money creation transactions have None as their input, and instead of a signature, contain 48 random bytes.
         If a new block is created, all connections of this node are notified by calling their notify_of_block() method.
         The method returns the new block hash (or None if there was no block)
         """
-        raise NotImplementedError()
+        if len(self.mem_pool) < BLOCK_SIZE - 1:
+            return None
+
+        # Create a coinbase transaction
+        coinbase_tx = Transaction(self.public_key, None, Signature(os.urandom(48)))
+
+        # Select transactions from the mempool
+        transactions = self.mem_pool[:BLOCK_SIZE - 1]
+        transactions.append(coinbase_tx)
+
+        # Create a new block
+        new_block = Block(transactions, self.get_latest_hash())
+        self.blockchain.append(new_block)
+
+        # Notify connections
+        for node in self.connections:
+            node.notify_of_block(new_block.get_block_hash(), self)
+
+        return new_block.get_block_hash()
 
     def get_block(self, block_hash: BlockHash) -> Block:
         """
@@ -128,13 +210,20 @@ class Node:
         This function returns a signed transaction that moves an unspent coin to the target.
         It chooses the coin based on the unspent coins that this node has.
         If the node already tried to spend a specific coin, and such a transaction exists in its mempool,
-        but it did not yet get into the blockchain then it should'nt try to spend it again (until clear_mempool() is
+        but it did not yet get into the blockchain then it shouldn't try to spend it again (until clear_mempool() is
         called -- which will wipe the mempool and thus allow to attempt these re-spends).
         The method returns None if there are no outputs that have not been spent already.
 
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
-        raise NotImplementedError()
+        for utxo in self.utxos:
+            if utxo not in [tx.input for tx in self.mem_pool]:
+                message = utxo.get_txid() + target
+                signature = sign(message, self.private_key)
+                new_tx = Transaction(target, utxo.get_txid(), signature)
+                if self.add_transaction_to_mempool(new_tx):
+                    return new_tx
+        return None
 
     def clear_mempool(self) -> None:
         """
