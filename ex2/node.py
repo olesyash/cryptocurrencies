@@ -88,8 +88,8 @@ class Node:
         We assume the sender of the message is specified, so that the node can choose to request this block if
         it wishes to do so.
         (if it is part of a longer unknown chain, these blocks are requested as well, until reaching a known block).
-        Upon receiving new blocks, they are processed and and checked for validity (check all signatures, hashes,
-        block size , etc).
+        Upon receiving new blocks, they are processed and checked for validity (check all signatures, hashes,
+        block size , etc.).
         If the block is on the longest chain, the mempool and utxo change accordingly.
         If the block is indeed the tip of the longest chain,
         a notification of this block is sent to the neighboring nodes of this node.
@@ -176,7 +176,7 @@ class Node:
     def get_block(self, block_hash: BlockHash) -> Block:
         """
         This function returns a block object given its hash.
-        If the block doesnt exist, a ValueError is raised.
+        If the block doesn't exist, a ValueError is raised.
         """
         for block in self.blockchain:
             if block.get_block_hash() == block_hash:
