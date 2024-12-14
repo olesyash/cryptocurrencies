@@ -14,7 +14,7 @@ class Node:
         created out of thin air and associated with the mining reward address"""
         self.mem_pool: List[Transaction] = []
         self.private_key, self.public_key = gen_keys()
-        self.connections = Set['Node']()
+        self.connections : Set['Node'] = set() 
         self.blockchain: List[Block] = []
         self.utxos: List[Transaction] = []
         self.latest_block_hash: BlockHash = BlockHash(b"Genesis")
@@ -60,10 +60,9 @@ class Node:
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
         # Check if the transaction is valid
-        if not verify(transaction.get_txid(), transaction.signature, transaction.output):
+        if not verify(transaction.get_txid() + transaction.output, transaction.signature, transaction.output):
             return False
-
-        # Check if the source has the coin
+       # Check if the source has the coin
         if transaction.input not in self.utxos:
             return False
 
@@ -99,6 +98,7 @@ class Node:
             # Request the block from the sender
             block = sender.get_block(block_hash)
             self.blockchain.append(block)
+            self.latest_block_hash = block_hash
             # Process and validate the block
             # (Assuming a validate_block function exists)
             if self.validate_block(block):
@@ -153,19 +153,20 @@ class Node:
         If a new block is created, all connections of this node are notified by calling their notify_of_block() method.
         The method returns the new block hash (or None if there was no block)
         """
-        if len(self.mem_pool) < BLOCK_SIZE - 1:
-            return None
-
         # Create a coinbase transaction
         coinbase_tx = Transaction(self.public_key, None, Signature(os.urandom(48)))
 
-        # Select transactions from the mempool
-        transactions = self.mem_pool[:BLOCK_SIZE - 1]
+        # Select transactions from the mempool (up to BLOCK_SIZE - 1)
+        transactions = self.mem_pool[:BLOCK_SIZE - 1] if self.mem_pool else []
         transactions.append(coinbase_tx)
 
         # Create a new block
-        new_block = Block(transactions, self.get_latest_hash())
+        new_block = Block(self.latest_block_hash, transactions)
         self.blockchain.append(new_block)
+        self.latest_block_hash = new_block.get_block_hash()
+        
+        # Update mempool and UTXO set
+        self.update_mempool_and_utxo(new_block)
 
         # Notify connections
         for node in self.connections:
@@ -212,12 +213,10 @@ class Node:
         If the node already tried to spend a specific coin, and such a transaction exists in its mempool,
         but it did not yet get into the blockchain then it shouldn't try to spend it again (until clear_mempool() is
         called -- which will wipe the mempool and thus allow to attempt these re-spends).
-        The method returns None if there are no outputs that have not been spent already.
-
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
         for utxo in self.utxos:
-            if utxo not in [tx.input for tx in self.mem_pool]:
+            if utxo.output == self.public_key and utxo not in [tx.input for tx in self.mem_pool]:
                 message = utxo.get_txid() + target
                 signature = sign(message, self.private_key)
                 new_tx = Transaction(target, utxo.get_txid(), signature)

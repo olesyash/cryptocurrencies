@@ -4,12 +4,12 @@ from typing import List
 import hashlib
 
 class Block:
-    def __init__(self, transactions: List[Transaction], prev_block_hash: BlockHash):
+    def __init__(self, prev_block_hash: BlockHash, transactions: List[Transaction]):
         """
         Initializes a block with a list of transactions and the hash of the previous block.
 
-        :param transactions: List of transactions included in this block.
         :param prev_block_hash: The hash of the previous block in the chain.
+        :param transactions: List of transactions included in this block.
         """
         self.transactions = transactions
         self.prev_block_hash = prev_block_hash
