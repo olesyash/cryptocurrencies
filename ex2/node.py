@@ -1,6 +1,6 @@
 import hashlib
 import os
-
+import secrets
 from .utils import *
 from .block import Block
 from .transaction import Transaction
@@ -29,21 +29,26 @@ class Node:
         if self is other:
             raise ValueError("A node cannot connect to itself")
 
-        # Add bidirectional connections
-        self.connections.add(other)
-        other.connections.add(self)
+        # Add bidirectional connections if not already connected
+        if other not in self.connections:
+            self.connections.add(other)
+            if self not in other.connections:
+                other.connections.add(self)
 
-        # Notify each other of the latest block
-        self.notify_of_block(self.latest_block_hash, other)
-        other.notify_of_block(other.latest_block_hash, self)
+            # Notify of latest blocks - let the node with more blocks notify first
+            if len(self.blockchain) >= len(other.blockchain):
+                if self.latest_block_hash != GENESIS_BLOCK_PREV:
+                    other.notify_of_block(self.latest_block_hash, self)
+            else:
+                if other.latest_block_hash != GENESIS_BLOCK_PREV:
+                    self.notify_of_block(other.latest_block_hash, other)
 
     def disconnect_from(self, other: 'Node') -> None:
         """Disconnects this node from the other node. If the two were not connected, then nothing happens"""
-        # Check if the other node is in this node's connections
         if other in self.connections:
-            # Remove the connection in both directions
-            self.connections.remove(other)
-            other.connections.remove(self)
+            self.connections.discard(other)
+            if self in other.connections:
+                other.connections.discard(self)
 
     def get_connections(self) -> Set['Node']:
         """Returns a set containing the connections of this node."""
@@ -111,43 +116,63 @@ class Node:
 
         # First verify that this chain leads to Genesis
         current_hash = block_hash
-        current_block = None
+        blocks_to_add = []
         try:
-            while current_hash != GENESIS_BLOCK_PREV:
+            while current_hash != GENESIS_BLOCK_PREV and current_hash not in [block.get_block_hash() for block in self.blockchain]:
                 current_block = sender.get_block(current_hash)
+                # Verify that the block matches the hash we requested
+                if current_block.get_block_hash() != current_hash:
+                    return
+                blocks_to_add.insert(0, current_block)  # Add to front to maintain order
                 current_hash = current_block.get_prev_block_hash()
-                if current_hash in [block.get_block_hash() for block in self.blockchain]:
-                    break
         except ValueError:
             # Chain doesn't lead to Genesis or a known block
             return
 
-        # Now get all blocks in order
-        blocks_to_add = []
-        current_hash = block_hash
-        while current_hash != GENESIS_BLOCK_PREV and current_hash not in [block.get_block_hash() for block in self.blockchain]:
-            current_block = sender.get_block(current_hash)
-            blocks_to_add.insert(0, current_block)  # Add to front to maintain order
-            current_hash = current_block.get_prev_block_hash()
+        # Find where the chains diverge
+        fork_point = -1
+        if current_hash != GENESIS_BLOCK_PREV:
+            fork_point = next((i for i, block in enumerate(self.blockchain) 
+                             if block.get_block_hash() == current_hash), -1)
 
-        # Validate the chain
-        for block in blocks_to_add:
-            if not self.validate_block(block):
-                return
+        # Compare chain lengths from fork point
+        current_chain_length = len(self.blockchain) - (fork_point + 1)
+        new_chain_length = len(blocks_to_add)
 
-        # Add blocks to our chain and update state
-        for block in blocks_to_add:
-            self.blockchain.append(block)
-            self.update_mempool_and_utxo(block)
-            self.latest_block_hash = block.get_block_hash()
+        # Only switch if new chain is longer
+        if new_chain_length > current_chain_length:
+            # Save current mempool
+            old_mempool = self.mem_pool.copy()
 
-        # Notify neighbors of the latest block
-        for node in self.connections:
-            if node != sender:  # Don't notify the sender
-                node.notify_of_block(block_hash, self)
+            # Reset state to fork point
+            self.blockchain = self.blockchain[:fork_point + 1] if fork_point >= 0 else []
+            self.utxos = []
+            self.mem_pool = []
 
-    @staticmethod
-    def validate_block(block: Block) -> bool:
+            # Rebuild UTXOs from fork point
+            for block in self.blockchain:
+                self.update_mempool_and_utxo(block)
+
+            # Add new blocks
+            for block in blocks_to_add:
+                if not self.validate_block(block):
+                    return
+                self.blockchain.append(block)
+                self.update_mempool_and_utxo(block)
+                self.latest_block_hash = block.get_block_hash()
+
+                # Notify neighbors of the valid block
+                for node in self.connections:
+                    if node != sender:  # Don't notify the sender
+                        node.notify_of_block(block.get_block_hash(), self)
+
+            # Restore mempool transactions that weren't included in the new chain
+            all_txids = {tx.get_txid() for block in blocks_to_add for tx in block.get_transactions()}
+            for tx in old_mempool:
+                if tx.get_txid() not in all_txids and self.validate_transaction(tx):
+                    self.mem_pool.append(tx)
+
+    def validate_block(self, block: Block) -> bool:
         """
         Validates the given block by checking all signatures, hashes, and block size.
         Returns True if the block is valid, otherwise False.
@@ -156,33 +181,77 @@ class Node:
         if len(block.get_transactions()) > BLOCK_SIZE:
             return False
 
+        # Only one coinbase transaction allowed per block
+        coinbase_count = sum(1 for tx in block.get_transactions() if tx.input is None)
+        if coinbase_count > 1:
+            return False
+
         # Validate each transaction in the block
         for tx in block.get_transactions():
             # Skip signature validation for coinbase transactions
             if tx.input is None:
                 continue
 
-            # For regular transactions, verify the signature
+            # For regular transactions, find the UTXO being spent
+            utxo = None
+            for prev_block in self.blockchain:
+                for prev_tx in prev_block.get_transactions():
+                    if prev_tx.get_txid() == tx.input:
+                        utxo = prev_tx
+                        break
+                if utxo:
+                    break
+
+            # Check if we found the UTXO
+            if utxo is None:
+                return False
+
+            # Verify the signature
             message = tx.input + tx.output
-            if not verify(message, tx.signature, tx.output):
+            if not verify(message, tx.signature, utxo.output):
                 return False
 
         return True
+
+    def validate_transaction(self, transaction: Transaction) -> bool:
+        """
+        Validates a single transaction by checking its signature and ensuring the input exists in UTXOs.
+        Returns True if the transaction is valid, otherwise False.
+        """
+        # Coinbase transactions are always valid
+        if transaction.input is None:
+            return True
+
+        # Find the UTXO being spent
+        utxo = None
+        for tx in self.utxos:
+            if tx.get_txid() == transaction.input:
+                utxo = tx
+                break
+
+        # Check if UTXO exists and verify signature
+        if utxo is None:
+            return False
+
+        message = transaction.input + transaction.output
+        return verify(message, transaction.signature, utxo.output)
 
     def update_mempool_and_utxo(self, block: Block) -> None:
         """
         Updates the mempool and UTXO set based on the transactions in the given block.
         """
-        # Remove spent transactions from UTXO set
+        # Remove spent transactions from UTXOs and add new ones
         for tx in block.get_transactions():
-            if tx.input is not None:
+            # Remove spent UTXO
+            if tx.input is not None:  # Skip coinbase transactions
                 self.utxos = [utxo for utxo in self.utxos if utxo.get_txid() != tx.input]
 
-        # Add new transactions to UTXO set
-        self.utxos.extend(block.get_transactions())
+            # Add new UTXO
+            self.utxos.append(tx)
 
-        # Remove included transactions from mempool
-        self.mem_pool = [tx for tx in self.mem_pool if tx not in block.get_transactions()]
+        # Remove transactions from mempool that are now in the block
+        block_txids = {tx.get_txid() for tx in block.get_transactions()}
+        self.mem_pool = [tx for tx in self.mem_pool if tx.get_txid() not in block_txids]
 
     def mine_block(self) -> Optional[BlockHash]:
         """
@@ -194,26 +263,25 @@ class Node:
         If a new block is created, all connections of this node are notified by calling their notify_of_block() method.
         The method returns the new block hash (or None if there was no block)
         """
-        # Create a coinbase transaction
-        coinbase_tx = Transaction(self.public_key, None, Signature(os.urandom(48)))
+        # Create coinbase transaction
+        coinbase_tx = Transaction(self.public_key, None, Signature(secrets.token_bytes(64)))
 
-        # Select transactions from the mempool (up to BLOCK_SIZE - 1)
-        transactions = self.mem_pool[:BLOCK_SIZE - 1] if self.mem_pool else []
-        transactions.append(coinbase_tx)
+        # Get transactions from mempool (up to BLOCK_SIZE-1)
+        block_txs = [coinbase_tx]
+        if len(self.mem_pool) > 0:
+            block_txs.extend(self.mem_pool[:BLOCK_SIZE - 1])
 
-        # Create a new block
-        new_block = Block(self.latest_block_hash, transactions)
-        self.blockchain.append(new_block)
-        
-        # Update mempool and UTXO set
-        self.update_mempool_and_utxo(new_block)
-        self.latest_block_hash = new_block.get_block_hash()
+        # Create and add the block
+        block = Block(self.latest_block_hash, block_txs)
+        self.blockchain.append(block)
+        self.update_mempool_and_utxo(block)
+        self.latest_block_hash = block.get_block_hash()
 
-        # Notify connections
+        # Notify neighbors
         for node in self.connections:
-            node.notify_of_block(new_block.get_block_hash(), self)
+            node.notify_of_block(block.get_block_hash(), self)
 
-        return new_block.get_block_hash()
+        return block.get_block_hash()
 
     def get_block(self, block_hash: BlockHash) -> Block:
         """
