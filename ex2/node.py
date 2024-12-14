@@ -59,17 +59,28 @@ class Node:
 
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
-        # Check if the transaction is valid
-        if not verify(transaction.get_txid() + transaction.output, transaction.signature, transaction.output):
-            return False
-       # Check if the source has the coin
-        if transaction.input not in self.utxos:
-            return False
+        # Skip signature validation for coinbase transactions
+        if transaction.input is not None:
+            # Find the UTXO being spent
+            utxo = None
+            for u in self.utxos:
+                if u.get_txid() == transaction.input:
+                    utxo = u
+                    break
 
-        # Check for contradicting transactions in the mempool
-        for tx in self.mem_pool:
-            if tx.input == transaction.input:
+            # Check if the source has the coin
+            if utxo is None:
                 return False
+
+            # Check if the transaction is valid (signature matches)
+            message = transaction.input + transaction.output
+            if not verify(message, transaction.signature, utxo.output):
+                return False
+
+            # Check for contradicting transactions in the mempool
+            for tx in self.mem_pool:
+                if tx.input == transaction.input:
+                    return False
 
         # Add the transaction to the mempool
         self.mem_pool.append(transaction)
@@ -94,19 +105,46 @@ class Node:
         a notification of this block is sent to the neighboring nodes of this node.
         (no need to notify of previous blocks -- the nodes will fetch them if needed)
         """
-        if block_hash not in [block.get_block_hash() for block in self.blockchain]:
-            # Request the block from the sender
-            block = sender.get_block(block_hash)
+        # If we already have this block, nothing to do
+        if block_hash in [block.get_block_hash() for block in self.blockchain]:
+            return
+
+        # First verify that this chain leads to Genesis
+        current_hash = block_hash
+        current_block = None
+        try:
+            while current_hash != GENESIS_BLOCK_PREV:
+                current_block = sender.get_block(current_hash)
+                current_hash = current_block.get_prev_block_hash()
+                if current_hash in [block.get_block_hash() for block in self.blockchain]:
+                    break
+        except ValueError:
+            # Chain doesn't lead to Genesis or a known block
+            return
+
+        # Now get all blocks in order
+        blocks_to_add = []
+        current_hash = block_hash
+        while current_hash != GENESIS_BLOCK_PREV and current_hash not in [block.get_block_hash() for block in self.blockchain]:
+            current_block = sender.get_block(current_hash)
+            blocks_to_add.insert(0, current_block)  # Add to front to maintain order
+            current_hash = current_block.get_prev_block_hash()
+
+        # Validate the chain
+        for block in blocks_to_add:
+            if not self.validate_block(block):
+                return
+
+        # Add blocks to our chain and update state
+        for block in blocks_to_add:
             self.blockchain.append(block)
-            self.latest_block_hash = block_hash
-            # Process and validate the block
-            # (Assuming a validate_block function exists)
-            if self.validate_block(block):
-                # Update mempool and utxo
-                self.update_mempool_and_utxo(block)
-                # Notify neighboring nodes
-                for node in self.connections:
-                    node.notify_of_block(block_hash, self)
+            self.update_mempool_and_utxo(block)
+            self.latest_block_hash = block.get_block_hash()
+
+        # Notify neighbors of the latest block
+        for node in self.connections:
+            if node != sender:  # Don't notify the sender
+                node.notify_of_block(block_hash, self)
 
     @staticmethod
     def validate_block(block: Block) -> bool:
@@ -120,13 +158,14 @@ class Node:
 
         # Validate each transaction in the block
         for tx in block.get_transactions():
-            if not verify(tx.get_txid(), tx.signature, tx.output):
-                return False
+            # Skip signature validation for coinbase transactions
+            if tx.input is None:
+                continue
 
-        # Validate block hash
-        block_data = b''.join(tx.get_txid() for tx in block.get_transactions())
-        if block.get_block_hash() != hashlib.sha256(block_data).digest():
-            return False
+            # For regular transactions, verify the signature
+            message = tx.input + tx.output
+            if not verify(message, tx.signature, tx.output):
+                return False
 
         return True
 
@@ -134,14 +173,16 @@ class Node:
         """
         Updates the mempool and UTXO set based on the transactions in the given block.
         """
+        # Remove spent transactions from UTXO set
         for tx in block.get_transactions():
-            # Remove the transaction from the mempool if it exists
-            self.mem_pool = [mempool_tx for mempool_tx in self.mem_pool if mempool_tx.get_txid() != tx.get_txid()]
-
-            # Update UTXO set
-            if tx.input:
+            if tx.input is not None:
                 self.utxos = [utxo for utxo in self.utxos if utxo.get_txid() != tx.input]
-            self.utxos.append(tx)
+
+        # Add new transactions to UTXO set
+        self.utxos.extend(block.get_transactions())
+
+        # Remove included transactions from mempool
+        self.mem_pool = [tx for tx in self.mem_pool if tx not in block.get_transactions()]
 
     def mine_block(self) -> Optional[BlockHash]:
         """
@@ -163,10 +204,10 @@ class Node:
         # Create a new block
         new_block = Block(self.latest_block_hash, transactions)
         self.blockchain.append(new_block)
-        self.latest_block_hash = new_block.get_block_hash()
         
         # Update mempool and UTXO set
         self.update_mempool_and_utxo(new_block)
+        self.latest_block_hash = new_block.get_block_hash()
 
         # Notify connections
         for node in self.connections:
@@ -188,9 +229,7 @@ class Node:
         """
         This function returns the last block hash known to this node (the tip of its current chain).
         """
-        if not self.blockchain:
-            return self.latest_block_hash
-        return self.blockchain[-1].get_block_hash()
+        return self.latest_block_hash
 
     def get_mempool(self) -> List[Transaction]:
         """
@@ -215,20 +254,29 @@ class Node:
         called -- which will wipe the mempool and thus allow to attempt these re-spends).
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
+        # Find an unspent transaction that we own and haven't tried to spend yet
         for utxo in self.utxos:
-            if utxo.output == self.public_key and utxo not in [tx.input for tx in self.mem_pool]:
-                message = utxo.get_txid() + target
+            # Skip if we've already tried to spend this UTXO
+            if any(tx.input == utxo.get_txid() for tx in self.mem_pool):
+                continue
+
+            # Check if we own this UTXO
+            if utxo.output == self.public_key:
+                # Create and sign the transaction
+                txid = utxo.get_txid()
+                message = txid + target
                 signature = sign(message, self.private_key)
-                new_tx = Transaction(target, utxo.get_txid(), signature)
+                new_tx = Transaction(target, txid, signature)
                 if self.add_transaction_to_mempool(new_tx):
                     return new_tx
+
         return None
 
     def clear_mempool(self) -> None:
         """
         Clears the mempool of this node. All transactions waiting to be entered into the next block are gone.
         """
-        self.mem_pool.clear()
+        self.mem_pool = []
 
     def get_balance(self) -> int:
         """
@@ -236,7 +284,11 @@ class Node:
         Coins that the node owned and sent away will still be considered as part of the balance until the spending
         transaction is in the blockchain.
         """
-        return len(self.utxos)
+        balance = 0
+        for utxo in self.utxos:
+            if utxo.output == self.public_key:
+                balance += 1
+        return balance
 
     def get_address(self) -> PublicKey:
         """
