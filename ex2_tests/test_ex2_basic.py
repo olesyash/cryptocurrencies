@@ -303,3 +303,199 @@ def test_bob_serves_wrong_block(alice: Node, bob: Node, charlie: Node, monkeypat
     alice.connect(bob)
     assert alice.get_latest_hash() == GENESIS_BLOCK_PREV
     assert alice.get_utxo() == []
+
+##################################################
+
+def test_block_with_invalid_previous_hash(alice: Node, bob: Node) -> None:
+    # Create a block with an invalid previous hash
+    invalid_prev_hash = BlockHash(hashlib.sha256(b"Invalid Hash").digest())
+    tx = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    block = Block(invalid_prev_hash, [tx])
+
+    # Notify Alice of the invalid block
+    alice.connect(bob)
+    bob.mine_block()
+    assert alice.get_latest_hash() != GENESIS_BLOCK_PREV
+    alice.notify_of_block(block.get_block_hash(), bob)
+    assert alice.get_latest_hash() == bob.get_latest_hash()
+
+
+def test_transaction_with_invalid_signature(alice: Node, bob: Node) -> None:
+    alice.mine_block()
+    invalid_sig = Signature(secrets.token_bytes(64))  # Random signature
+    invalid_tx = Transaction(bob.get_address(), alice.get_utxo()[0].get_txid(), invalid_sig)
+
+    # Attempt to add invalid transaction to mempool
+    assert not alice.add_transaction_to_mempool(invalid_tx)
+
+
+def test_block_includes_duplicate_transactions(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    alice.mine_block()
+    bob.connect(alice)
+    tx1 = alice.create_transaction(alice.get_address())
+    bob.mine_block()
+    tx2 = bob.create_transaction(alice.get_address())
+
+    # alice.connect(bob)
+    block1 = Block(GENESIS_BLOCK_PREV, [tx1])  # Duplicate transactions
+    block2 = Block(block1.get_block_hash(), [tx2, tx2])  # Duplicate transactions
+    block3 = Block(block2.get_block_hash(), [Transaction(gen_keys()[1], None, Signature(secrets.token_bytes(64)))])
+    block_chain = [block1, block2,block3]
+    eve = evil_node_maker(block_chain)
+    # Notify Alice of a block with duplicate transactions
+    alice.notify_of_block(block3.get_block_hash(), eve)
+    assert alice.get_latest_hash() != block3.get_block_hash()
+
+
+def test_invalid_block_hash_provided_in_chain(alice: Node, bob: Node) -> None:
+    alice.mine_block()
+    bob.mine_block()
+    fake_hash = BlockHash(hashlib.sha256(b"Fake Block").digest())
+    with pytest.raises(ValueError):
+        alice.get_block(fake_hash)
+
+
+def test_unspent_output_double_spent_in_block(alice: Node, bob: Node) -> None:
+    alice.mine_block()
+    tx1 = alice.create_transaction(bob.get_address())
+    # tx1 = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+
+    # Create a block with the same transaction spent twice
+    block = Block(
+        GENESIS_BLOCK_PREV,
+        [tx1, tx1],  # Double-spend
+    )
+    mock_node = Mock()
+    mock_node.get_latest_hash.return_value = block.get_block_hash()
+    mock_node.get_block.return_value = block
+
+    bob.notify_of_block(block.get_block_hash(), mock_node)
+    assert alice.get_balance() == 1
+
+
+def test_inconsistent_chain_height(alice: Node, bob: Node) -> None:
+    alice.mine_block()
+    alice.mine_block()
+    bob.mine_block()
+
+    # Manually alter the chain height for Bob
+    def fake_height():
+        return 1  # Incorrect height
+    bob.get_chain_height = fake_height
+
+    alice.connect(bob)
+    assert alice.get_latest_hash() == bob.get_latest_hash()
+
+
+def test_propagating_invalid_transaction(alice: Node, bob: Node, charlie: Node) -> None:
+    alice.connect(bob)
+    bob.connect(charlie)
+    alice.mine_block()
+
+    # Create and propagate an invalid transaction
+    invalid_tx = Transaction(bob.get_address(), None, Signature(secrets.token_bytes(64)))
+    assert not alice.add_transaction_to_mempool(invalid_tx)
+    assert invalid_tx not in bob.get_mempool()
+    assert invalid_tx not in charlie.get_mempool()
+
+
+def test_blockchain_loop_detection(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    # צור מפתח ציבורי פיקטיבי עבור עסקאות
+    public_key, _ = gen_keys()
+
+    # צור את הבלוק הראשון
+    tx1 = Transaction(public_key, None, Signature(secrets.token_bytes(64)))
+    block1 = Block(GENESIS_BLOCK_PREV, [tx1])  # מצביע על block2 (לולאה)
+
+    # צור את הבלוק השני
+    tx2 = Transaction(public_key, None, Signature(secrets.token_bytes(64)))
+    block2 = Block(block1.get_block_hash(), [tx2])  # מצביע על block1
+
+    # עדכן את הבלוק הראשון שיצביע על block2
+    block1.prev_block_hash = block2.get_block_hash()
+
+    blockchain = [block1, block2]
+    bob.blockchain = blockchain
+    # נסה להוסיף את הבלוק הראשון (עם לולאה)
+    alice.notify_of_block(block2.get_block_hash(), bob)
+    assert alice.get_latest_hash() == GENESIS_BLOCK_PREV
+    assert alice.get_utxo() == []
+
+    block1.prev_block_hash = GENESIS_BLOCK_PREV
+    alice.notify_of_block(block2.get_block_hash(), bob)
+
+
+    # ודא שהמערכת לא מקבלת את הבלוק
+    assert alice.get_latest_hash() == block2.get_block_hash()
+    assert len(alice.get_utxo()) == 2
+
+def test_append_two_different_blockchain(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    tx1 = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    tx2 = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    block1 = Block(hashlib.sha256(b"Invalid Genesis Hash").digest(), [tx1])
+    block2 = Block(block1.get_block_hash(), [tx2])
+    block_chain = [block1, block2]
+    eve = evil_node_maker(block_chain)    
+    alice.notify_of_block(block2.get_block_hash(), eve)
+    assert alice.get_latest_hash() == GENESIS_BLOCK_PREV
+
+def test_append_cut_blockchain(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    alice_block_hash = alice.mine_block()
+    tx1 = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    tx2 = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    block1 = Block(alice.get_latest_hash(), [tx1])
+    block2 = Block(block1.get_block_hash(), [tx2])
+    block_chain = [block1, block2]
+    eve = evil_node_maker(block_chain)    
+    alice.notify_of_block(block1.get_block_hash(), eve)
+    assert alice.get_latest_hash() == block1.get_block_hash()
+
+def test_output_is_none(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    alice.mine_block()
+    tx0 = alice.create_transaction(None)
+    alice.add_transaction_to_mempool(tx0)
+    alice.mine_block()
+
+    tx1 = Transaction(bob.get_address(), alice.unspent_transaction[0].get_txid(), b"sig")
+    tx2 = Transaction(bob.get_address(), alice.unspent_transaction[1].get_txid(), b"sig")
+    assert alice.add_transaction_to_mempool(tx1) == False
+    alice.add_transaction_to_mempool(tx2)
+    assert alice.mine_block() is not None
+    alice.connect(None)
+    alice.disconnect_from(None)
+
+
+def test_double_spend_tx(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    alice.mine_block()
+    mined_tx = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+
+    tx = alice.create_transaction(bob.get_address())
+    block1 = Block(alice.get_latest_hash(),[mined_tx, tx ,tx])
+    block2 = Block(block1.get_block_hash(),[mined_tx, tx])
+    eve= evil_node_maker([block1, block2])
+    alice.notify_of_block(block2.get_block_hash(), eve)
+    assert alice.get_latest_hash() != block2.get_block_hash()
+
+def test_overflow_size(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
+    for _ in range(12):
+        alice.mine_block()
+    txs = []
+    for _ in range(12):
+        txs.append(alice.create_transaction(bob.get_address()))
+
+    mined_tx = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
+    block1 = Block(alice.get_latest_hash(),[mined_tx] + txs)
+    eve = evil_node_maker([block1])
+    alice.notify_of_block(block1.get_block_hash(), eve)
+    assert alice.get_latest_hash() != block1.get_block_hash()
+
+    alice.mine_block()
+    assert len(alice.get_mempool()) == 3
+    assert len(alice.get_block(alice.get_latest_hash()).get_transactions()) == BLOCK_SIZE
+    assert alice.get_balance() == 4
+    alice.clear_mempool()
+    assert len(alice.get_mempool()) == 0
+    assert alice.get_balance() == 4
+
+
+    
