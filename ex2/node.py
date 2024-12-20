@@ -118,6 +118,11 @@ class Node:
         current_hash = block_hash
         blocks_to_add = []
         try:
+            block = sender.get_block(block_hash)
+        
+            # If block is invalid, return early but keep transactions
+            if not self.validate_block(block):
+                return
             while current_hash != GENESIS_BLOCK_PREV and current_hash not in [block.get_block_hash() for block in self.blockchain]:
                 current_block = sender.get_block(current_hash)
                 # Verify that the block matches the hash we requested
@@ -186,11 +191,19 @@ class Node:
         if coinbase_count > 1:
             return False
 
+        # Track spent transaction IDs within this block
+        spent_txids = set()
+
         # Validate each transaction in the block
         for tx in block.get_transactions():
             # Skip signature validation for coinbase transactions
             if tx.input is None:
                 continue
+
+            # Check for double spending within block
+            if tx.input in spent_txids:
+                return False
+            spent_txids.add(tx.input)
 
             # For regular transactions, find the UTXO being spent
             utxo = None
@@ -208,7 +221,10 @@ class Node:
 
             # Verify the signature
             message = tx.input + tx.output
-            if not verify(message, tx.signature, utxo.output):
+            try:
+                if not verify(message, tx.signature, utxo.output):
+                    return False
+            except:
                 return False
 
         return True
