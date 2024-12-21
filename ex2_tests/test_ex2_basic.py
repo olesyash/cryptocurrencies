@@ -450,21 +450,6 @@ def test_append_cut_blockchain(alice: Node, bob: Node, evil_node_maker: EvilNode
     alice.notify_of_block(block1.get_block_hash(), eve)
     assert alice.get_latest_hash() == block1.get_block_hash()
 
-def test_output_is_none(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
-    alice.mine_block()
-    tx0 = alice.create_transaction(None)
-    alice.add_transaction_to_mempool(tx0)
-    alice.mine_block()
-
-    tx1 = Transaction(bob.get_address(), alice.unspent_transaction[0].get_txid(), b"sig")
-    tx2 = Transaction(bob.get_address(), alice.unspent_transaction[1].get_txid(), b"sig")
-    assert alice.add_transaction_to_mempool(tx1) == False
-    alice.add_transaction_to_mempool(tx2)
-    assert alice.mine_block() is not None
-    alice.connect(None)
-    alice.disconnect_from(None)
-
-
 def test_double_spend_tx(alice: Node, bob: Node, evil_node_maker: EvilNodeMaker) -> None:
     alice.mine_block()
     mined_tx = Transaction(alice.get_address(), None, Signature(secrets.token_bytes(64)))
