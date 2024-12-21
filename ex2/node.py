@@ -61,38 +61,46 @@ class Node:
         (i) the transaction is invalid (the signature fails)
         (ii) the source doesn't have the coin that it tries to spend
         (iii) there is contradicting tx in the mempool.
+        (iv) it's a coinbase transaction (those can only be created through mining)
 
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
-        # Skip signature validation for coinbase transactions
-        if transaction.input is not None:
-            # Find the UTXO being spent
-            utxo = None
-            for u in self.utxos:
-                if u.get_txid() == transaction.input:
-                    utxo = u
-                    break
+        # Skip if transaction is already in mempool
+        if transaction in self.mem_pool:
+            return True
 
-            # Check if the source has the coin
-            if utxo is None:
+        # Reject coinbase transactions - they can only be created through mining
+        if transaction.input is None:
+            return False
+
+        # Find the UTXO being spent
+        utxo = None
+        for u in self.utxos:
+            if u.get_txid() == transaction.input:
+                utxo = u
+                break
+
+        # Check if the source has the coin
+        if utxo is None:
+            return False
+
+        # Check if the transaction is valid (signature matches)
+        message = transaction.input + transaction.output
+        if not verify(message, transaction.signature, utxo.output):
+            return False
+
+        # Check for contradicting transactions in the mempool
+        for tx in self.mem_pool:
+            if tx.input == transaction.input:
                 return False
-
-            # Check if the transaction is valid (signature matches)
-            message = transaction.input + transaction.output
-            if not verify(message, transaction.signature, utxo.output):
-                return False
-
-            # Check for contradicting transactions in the mempool
-            for tx in self.mem_pool:
-                if tx.input == transaction.input:
-                    return False
 
         # Add the transaction to the mempool
         self.mem_pool.append(transaction)
 
         # Send the transaction to neighboring nodes
         for node in self.connections:
-            node.add_transaction_to_mempool(transaction)
+            if transaction not in node.get_mempool():  # Only forward if node doesn't have it
+                node.add_transaction_to_mempool(transaction)
 
         return True
 
@@ -118,11 +126,6 @@ class Node:
         current_hash = block_hash
         blocks_to_add = []
         try:
-            block = sender.get_block(block_hash)
-        
-            # If block is invalid, return early but keep transactions
-            if not self.validate_block(block):
-                return
             while current_hash != GENESIS_BLOCK_PREV and current_hash not in [block.get_block_hash() for block in self.blockchain]:
                 current_block = sender.get_block(current_hash)
                 # Verify that the block matches the hash we requested
@@ -158,10 +161,11 @@ class Node:
             for block in self.blockchain:
                 self.update_mempool_and_utxo(block)
 
-            # Add new blocks
+            # Add new blocks one by one, stopping at first invalid block
             for block in blocks_to_add:
                 if not self.validate_block(block):
-                    return
+                    # Stop processing blocks but keep what we've validated so far
+                    break
                 self.blockchain.append(block)
                 self.update_mempool_and_utxo(block)
                 self.latest_block_hash = block.get_block_hash()
@@ -171,8 +175,12 @@ class Node:
                     if node != sender:  # Don't notify the sender
                         node.notify_of_block(block.get_block_hash(), self)
 
+            # If we didn't process any blocks, restore genesis state
+            if not self.blockchain:
+                self.latest_block_hash = GENESIS_BLOCK_PREV
+
             # Restore mempool transactions that weren't included in the new chain
-            all_txids = {tx.get_txid() for block in blocks_to_add for tx in block.get_transactions()}
+            all_txids = {tx.get_txid() for block in self.blockchain[fork_point + 1:] for tx in block.get_transactions()}
             for tx in old_mempool:
                 if tx.get_txid() not in all_txids and self.validate_transaction(tx):
                     self.mem_pool.append(tx)
@@ -190,6 +198,13 @@ class Node:
         coinbase_count = sum(1 for tx in block.get_transactions() if tx.input is None)
         if coinbase_count > 1:
             return False
+
+        # Check for duplicate transactions within block
+        txids = set()
+        for tx in block.get_transactions():
+            if tx.get_txid() in txids:
+                return False
+            txids.add(tx.get_txid())
 
         # Track spent transaction IDs within this block
         spent_txids = set()
@@ -221,10 +236,7 @@ class Node:
 
             # Verify the signature
             message = tx.input + tx.output
-            try:
-                if not verify(message, tx.signature, utxo.output):
-                    return False
-            except:
+            if not verify(message, tx.signature, utxo.output):
                 return False
 
         return True
@@ -338,6 +350,10 @@ class Node:
         called -- which will wipe the mempool and thus allow to attempt these re-spends).
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
+        # Validate target address
+        if target is None:
+            return None
+
         # Find an unspent transaction that we own and haven't tried to spend yet
         for utxo in self.utxos:
             # Skip if we've already tried to spend this UTXO

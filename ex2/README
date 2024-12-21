@@ -1,0 +1,12 @@
+Olesya Sharify 319346565
+Yaniv Ankri 208272773
+
+## Exercise Description
+
+In this exercise, we implemented a simple cryptocurrency wallet system. The wallet can update its balance by querying a bank, create transactions to transfer coins, and handle unspent transaction outputs (UTXOs). The main tasks include:
+
+1. Implementing the `update` method to process blocks since the last update and update the wallet's balance.
+2. Implementing the `create_transaction` method to create and sign transactions using unspent coins.
+3. Ensuring that transactions are correctly signed and preventing double-spending until `unfreeze_all` is called.
+
+We also wrote tests to verify the functionality of the wallet and transactions.
