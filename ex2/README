@@ -1,12 +1,88 @@
 Olesya Sharify 319346565
 Yaniv Ankri 208272773
 
-## Exercise Description
+## Description
 
-In this exercise, we implemented a simple cryptocurrency wallet system. The wallet can update its balance by querying a bank, create transactions to transfer coins, and handle unspent transaction outputs (UTXOs). The main tasks include:
+ Blockchain Implementation Exercise
 
-1. Implementing the `update` method to process blocks since the last update and update the wallet's balance.
-2. Implementing the `create_transaction` method to create and sign transactions using unspent coins.
-3. Ensuring that transactions are correctly signed and preventing double-spending until `unfreeze_all` is called.
+This exercise implements a basic blockchain system with the following key components:
 
-We also wrote tests to verify the functionality of the wallet and transactions.
+## Components
+
+### Node
+- Represents a participant in the blockchain network
+- Maintains a copy of the blockchain
+- Manages unspent transaction outputs (UTXOs)
+- Handles transaction validation and propagation
+- Implements mining functionality
+- Manages peer-to-peer connections
+
+### Block
+- Contains a list of transactions
+- Links to previous block via hash
+- Includes mining rewards (coinbase transactions)
+- Has a maximum size limit (BLOCK_SIZE)
+
+### Transaction
+- Represents transfer of coins between addresses
+- Contains input (previous transaction), output (recipient), and signature
+- Special case: Coinbase transactions for mining rewards
+
+## Key Features
+
+1. **Transaction Validation**
+   - Signature verification
+   - Double-spend prevention
+   - UTXO tracking
+   - Mempool management
+
+2. **Block Validation**
+   - Size limits
+   - Transaction validity
+   - Previous hash verification
+   - Coinbase transaction rules
+
+3. **Network Protocol**
+   - Peer discovery and connection
+   - Block propagation
+   - Transaction propagation
+   - Chain synchronization
+
+4. **Consensus Rules**
+   - Longest chain selection
+   - Fork resolution
+   - Genesis block handling
+
+5. **Security Features**
+   - Cryptographic signatures
+   - Hash-based block linking
+   - Double-spend protection
+   - Invalid transaction rejection
+
+## Implementation Details
+
+- Uses Ed25519 for cryptographic operations
+- SHA256 for block and transaction hashing
+- Maximum block size of 10 transactions
+- Supports network partitioning and reorganization
+- Handles various edge cases (invalid blocks, double spends, etc.)
+
+## Usage
+
+The system can be used to:
+1. Create and manage blockchain nodes
+2. Send transactions between addresses
+3. Mine new blocks
+4. Maintain network connections
+5. Validate and propagate blockchain data
+
+## Security Considerations
+
+The implementation includes protections against:
+- Double spending
+- Invalid signatures
+- Chain reorganization attacks
+- Block size manipulation
+- Invalid transaction propagation
+- Duplicate transactions within blocks
+- Invalid coinbase transactions
