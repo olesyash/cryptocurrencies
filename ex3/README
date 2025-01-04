@@ -42,32 +42,6 @@ The withdrawal amount cannot exceed the user's balance
 The balance is checked BEFORE any funds are sent
 This is a simple but effective mitigation against reentrancy attacks. The contract updates the state (checking balance) before performing the external call, which breaks the typical reentrancy pattern.
 
-
-function sendTo(address payable destination) external {
-    uint amount = userBalances[msg.sender];
-    (bool success, ) = destination.call{value: amount}("");
-    require(success);
-    userBalances[msg.sender] = 0;  // State update AFTER external call
-}
-Reentrancy Attack Sequence:
-
-Attacker calls sendTo()
-Contract sends funds via call()
-Attacker's receive() function is triggered
-Before balance is set to 0, attacker can call sendTo() again
-Repeatedly drain more funds than originally in the account
-
-In Wallet2:
-
-'''
-function sendTo(address payable destination, uint amount) external {
-    require(amount <= userBalances[msg.sender]);  // Check 1: Prevent overdrawing
-    (bool success, ) = destination.call{value: amount}("");
-    require(success);
-    userBalances[msg.sender] -= amount;  // State update BEFORE external call
-}
-'''
-
 Reentrancy Prevention Mechanisms:
 
 Explicit amount parameter prevents sending entire balance automatically
