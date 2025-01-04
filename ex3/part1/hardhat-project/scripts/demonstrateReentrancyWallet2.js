@@ -21,9 +21,9 @@ async function main() {
   const depositAmount = ethers.parseEther("4.0");
   await wallet2.connect(owner).deposit({ value: depositAmount });
 
-  console.log("Initial Wallet Balance:", 
+  console.log("Initial Wallet Balance:",
     ethers.formatEther(await ethers.provider.getBalance(wallet2Address)), "ETH");
-  console.log("Attack Contract Balance:", 
+  console.log("Attack Contract Balance:",
     ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
 
   // Perform the attack
@@ -31,9 +31,9 @@ async function main() {
   await attackTx.wait();
 
   console.log("\nAfter Attack:");
-  console.log("Wallet Balance:", 
+  console.log("Wallet Balance:",
     ethers.formatEther(await ethers.provider.getBalance(wallet2Address)), "ETH");
-  console.log("Attack Contract Balance:", 
+  console.log("Attack Contract Balance:",
     ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
 
   // Withdraw stolen funds
@@ -41,7 +41,7 @@ async function main() {
   await withdrawTx.wait();
 
   console.log("\nAfter Withdrawal:");
-  console.log("Attack Contract Balance:", 
+  console.log("Attack Contract Balance:",
     ethers.formatEther(await ethers.provider.getBalance(attackContractAddress)), "ETH");
 }
 
