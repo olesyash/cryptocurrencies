@@ -73,36 +73,33 @@ contract RPS is IRPS {
         // Ensure game doesn't already exist or is not in progress
         require(games[gameID].state == GameState.NO_GAME || games[gameID].state == GameState.MOVE1, "Game already in progress");
         
-        // Player must have sufficient balance
-        require(playerBalances[msg.sender] >= betAmount, "Insufficient balance");
-
+        Game storage game = games[gameID];
+        
         // First player to make a move
-        if (games[gameID].player1 == address(0)) {
-            games[gameID] = Game({
-                player1: msg.sender,
-                player2: address(0),
-                commitment1: hiddenMove,
-                commitment2: bytes32(0),
-                move1: Move.NONE,
-                move2: Move.NONE,
-                betAmount: betAmount,
-                revealBlock: 0,
-                state: GameState.MOVE1
-            });
+        if (game.player1 == address(0)) {
+            // Check balance for first player
+            require(playerBalances[msg.sender] >= betAmount, "Insufficient balance");
+            
+            game.player1 = msg.sender;
+            game.commitment1 = hiddenMove;
+            game.betAmount = betAmount;
+            game.state = GameState.MOVE1;
             
             // Deduct bet from player's balance
             playerBalances[msg.sender] -= betAmount;
         } 
         // Second player to make a move
-        else if (games[gameID].state == GameState.MOVE1) {
-            require(msg.sender != games[gameID].player1, "Cannot play against yourself");
+        else if (game.state == GameState.MOVE1) {
+            require(msg.sender != game.player1, "Cannot play against yourself");
+            require(playerBalances[msg.sender] >= game.betAmount, "Insufficient balance");
             
-            games[gameID].player2 = msg.sender;
-            games[gameID].commitment2 = hiddenMove;
-            games[gameID].state = GameState.MOVE2;
+            game.player2 = msg.sender;
+            game.commitment2 = hiddenMove;
+            game.state = GameState.MOVE2;
             
-            // Deduct bet from player's balance
-            playerBalances[msg.sender] -= betAmount;
+            // Deduct first player's bet amount from second player's balance
+            // Ignore the betAmount parameter passed by the second player
+            playerBalances[msg.sender] -= game.betAmount;
         } else {
             revert("Invalid game state");
         }
@@ -125,14 +122,17 @@ contract RPS is IRPS {
     function revealMove(uint gameID, Move move, bytes32 key) external {
         Game storage game = games[gameID];
         
-        // Ensure game is in correct state
-        require(game.state == GameState.MOVE1 || game.state == GameState.MOVE2, "Invalid game state for reveal");
+        // Ensure game is in correct state - can only reveal after both players have moved
+        require(game.state == GameState.MOVE2 || game.state == GameState.REVEAL1, 
+                "Invalid game state for reveal");
         
         // Verify player's move matches their commitment
         if (msg.sender == game.player1) {
+            require(game.move1 == Move.NONE, "Move already revealed");
             require(checkCommitment(game.commitment1, move, key), "Invalid move commitment");
             game.move1 = move;
         } else if (msg.sender == game.player2) {
+            require(game.move2 == Move.NONE, "Move already revealed");
             require(checkCommitment(game.commitment2, move, key), "Invalid move commitment");
             game.move2 = move;
         } else {
@@ -141,9 +141,6 @@ contract RPS is IRPS {
         
         // Update game state
         if (game.move1 != Move.NONE && game.move2 != Move.NONE) {
-            game.state = GameState.REVEAL1;
-            game.revealBlock = block.number;
-            
             // Determine winner
             address winner = determineWinner(gameID);
             
@@ -155,6 +152,13 @@ contract RPS is IRPS {
             } else {
                 playerBalances[winner] += 2 * game.betAmount;
             }
+
+            // Reset game state to NO_GAME since it's finished
+            delete games[gameID];
+        } else if (game.state == GameState.MOVE2) {
+            // First reveal, set state to REVEAL1
+            game.state = GameState.REVEAL1;
+            game.revealBlock = block.number;
         }
     }
 
@@ -187,11 +191,12 @@ contract RPS is IRPS {
         // If one player didn't reveal, the other wins
         if (game.move1 == Move.NONE) {
             playerBalances[game.player2] += 2 * game.betAmount;
-            game.state = GameState.LATE;
         } else if (game.move2 == Move.NONE) {
             playerBalances[game.player1] += 2 * game.betAmount;
-            game.state = GameState.LATE;
         }
+
+        // Clean up the game
+        delete games[gameID];
     }
 
     function getGameState(uint gameID) external view returns (GameState) {
